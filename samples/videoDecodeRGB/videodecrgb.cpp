@@ -43,6 +43,18 @@ THE SOFTWARE.
 #include "roc_video_dec.h"
 #include "video_post_process.h"
 
+#include "opencv2/opencv.hpp"
+
+#if USE_OPENCV_4
+#define CV_LOAD_IMAGE_COLOR IMREAD_COLOR
+#define CV_BGR2GRAY COLOR_BGR2GRAY
+#define CV_GRAY2RGB COLOR_GRAY2RGB
+#define CV_RGB2BGR COLOR_RGB2BGR
+#define CV_FONT_HERSHEY_SIMPLEX FONT_HERSHEY_SIMPLEX
+#define CV_FILLED FILLED
+#define CV_WINDOW_AUTOSIZE WINDOW_AUTOSIZE
+#endif
+
 std::vector<std::string> st_output_format_name = {"native", "bgr", "bgr48", "rgb", "rgb48", "bgra", "bgra64", "rgba", "rgba64"};
 
 void ShowHelpAndExit(const char *option = NULL) {
@@ -57,10 +69,43 @@ void ShowHelpAndExit(const char *option = NULL) {
     exit(0);
 }
 
+int frame_counter = 1;
+
+void DumpRGBImage(std::string outputfileName, void* pdevMem, OutputSurfaceInfo *surf_info, int rgb_image_size) {
+    uint8_t *hstPtr = nullptr;
+    hstPtr = new uint8_t [rgb_image_size];
+    hipError_t hip_status = hipSuccess;
+    hip_status = hipMemcpyDtoH((void *)hstPtr, pdevMem, rgb_image_size);
+    if (hip_status != hipSuccess) {
+        std::cout << "ERROR: hipMemcpyDtoH failed! (" << hip_status << ")" << std::endl;
+        delete [] hstPtr;
+        return;
+    }
+    std::cerr << "Frame" << frame_counter << " Image size : " << rgb_image_size << "\n";
+    unsigned h = 1024;
+    unsigned w = 2048;
+    cv::Mat mat_input(h, w, CV_8UC3);
+    cv::Mat mat_color;
+    memcpy(mat_input.data, hstPtr, rgb_image_size);
+
+    std::vector<int> compression_params;
+    compression_params.push_back(cv::IMWRITE_PNG_COMPRESSION);
+    compression_params.push_back(9);
+    // if (frame_counter > 590 || frame_counter % 30 == 0) {
+        std::string out_filename = "output_frame_" + std::to_string(frame_counter++) + ".png";
+        cv::imwrite(out_filename, mat_input, compression_params);
+    // } else {
+    //     frame_counter++;
+    // }
+    if (hstPtr != nullptr) {
+        delete [] hstPtr;
+        hstPtr = nullptr;
+    }
+}
 constexpr int frame_buffers_size = 2;
 std::queue<uint8_t*> frame_queue[frame_buffers_size];
 std::mutex mutex[frame_buffers_size];
-std::condition_variable cv[frame_buffers_size];
+std::condition_variable condition_variable[frame_buffers_size];
 
 void ColorSpaceConversionThread(std::atomic<bool>& continue_processing, bool convert_to_rgb, Dim *p_resize_dim, OutputSurfaceInfo **surf_info, OutputSurfaceInfo **res_surf_info,
         OutputFormatEnum e_output_format, uint8_t *p_rgb_dev_mem, uint8_t *p_resize_dev_mem, bool dump_output_frames,
@@ -76,7 +121,7 @@ void ColorSpaceConversionThread(std::atomic<bool>& continue_processing, bool con
         uint8_t *out_frame;
         {
             std::unique_lock<std::mutex> lock(mutex[current_frame_index]);
-            cv[current_frame_index].wait(lock, [&] {return !frame_queue[current_frame_index].empty() || !continue_processing;});
+            condition_variable[current_frame_index].wait(lock, [&] {return !frame_queue[current_frame_index].empty() || !continue_processing;});
             if (!continue_processing && frame_queue[current_frame_index].empty()) {
                 break;
             }
@@ -131,9 +176,10 @@ void ColorSpaceConversionThread(std::atomic<bool>& continue_processing, bool con
             post_proc.ColorConvertYUV2RGB(out_frame, p_surf_info, p_rgb_dev_mem, e_output_format, viddec.GetStream());
         }
         if (dump_output_frames) {
-            if (convert_to_rgb)
+            if (convert_to_rgb) {
+                DumpRGBImage(output_file_path, p_rgb_dev_mem, p_surf_info, rgb_image_size);
                 viddec.SaveFrameToFile(output_file_path, p_rgb_dev_mem, p_surf_info, rgb_image_size);
-            else
+            } else
                 viddec.SaveFrameToFile(output_file_path, out_frame, p_surf_info);
         }
         if(b_generate_md5 && convert_to_rgb){
@@ -141,7 +187,7 @@ void ColorSpaceConversionThread(std::atomic<bool>& continue_processing, bool con
         }
         
 
-        cv[current_frame_index].notify_one();
+        condition_variable[current_frame_index].notify_one();
         current_frame_index = (current_frame_index + 1) % frame_buffers_size;
     }
 }
@@ -254,6 +300,7 @@ int main(int argc, char **argv) {
     try {
         VideoDemuxer demuxer(input_file_path.c_str());
         rocDecVideoCodec rocdec_codec_id = AVCodec2RocDecVideoCodec(demuxer.GetCodecID());
+        std::cerr << "Codec ID : " << (int)rocdec_codec_id << "\n";
         RocVideoDecoder viddec(device_id, mem_type, rocdec_codec_id, false, p_crop_rect);
         VideoPostProcess post_process;
 
@@ -275,6 +322,7 @@ int main(int argc, char **argv) {
         }
 
         int n_video_bytes = 0, n_frames_returned = 0, n_frame = 0;
+        int pkg_flags = 0;
         uint8_t *p_video = nullptr;
         uint8_t *p_frame = nullptr;
         int64_t pts = 0;
@@ -286,11 +334,43 @@ int main(int argc, char **argv) {
         std::atomic<bool> continue_processing(true);
         std::thread color_space_conversion_thread(ColorSpaceConversionThread, std::ref(continue_processing), std::ref(convert_to_rgb), &resize_dim, &surf_info, &resize_surf_info, std::ref(e_output_format),
                                     std::ref(p_rgb_dev_mem), std::ref(p_resize_dev_mem), std::ref(dump_output_frames), std::ref(output_file_path), std::ref(viddec), std::ref(post_process), b_generate_md5);
+        VideoSeekContext video_seek_ctx;
+        // seek options
+        uint64_t seek_to_frame = 0;
+        int seek_mode = 0;
+        bool first_frame = true;
+        int seek_criteria = 1;
 
         auto startTime = std::chrono::high_resolution_clock::now();
         do {
-            demuxer.Demux(&p_video, &n_video_bytes, &pts);
-            n_frames_returned = viddec.DecodeFrame(p_video, n_video_bytes, 0, pts);
+            auto start_time = std::chrono::high_resolution_clock::now();
+            if (seek_criteria == 1 && first_frame) {
+                // use VideoSeekContext class to seek to given frame number
+                video_seek_ctx.seek_frame_ = seek_to_frame;
+                video_seek_ctx.seek_crit_ = SEEK_CRITERIA_FRAME_NUM;
+                video_seek_ctx.seek_mode_ = (seek_mode ? SEEK_MODE_EXACT_FRAME : SEEK_MODE_PREV_KEY_FRAME);
+                demuxer.Seek(video_seek_ctx, &p_video, &n_video_bytes);
+                pts = video_seek_ctx.out_frame_pts_;
+                std::cout << "info: Number of frames that were decoded during seek - " << video_seek_ctx.num_frames_decoded_ << std::endl;
+                first_frame = false;
+            } else if (seek_criteria == 2 && first_frame) {
+                // use VideoSeekContext class to seek to given timestamp
+                video_seek_ctx.seek_frame_ = seek_to_frame;
+                video_seek_ctx.seek_crit_ = SEEK_CRITERIA_TIME_STAMP;
+                video_seek_ctx.seek_mode_ = (seek_mode ? SEEK_MODE_EXACT_FRAME : SEEK_MODE_PREV_KEY_FRAME);
+                demuxer.Seek(video_seek_ctx, &p_video, &n_video_bytes);
+                pts = video_seek_ctx.out_frame_pts_;
+                std::cout << "info: Duration of frame found after seek - " << video_seek_ctx.out_frame_duration_ << " ms" << std::endl;
+                first_frame = false;
+            } else {
+                demuxer.Demux(&p_video, &n_video_bytes, &pts);
+            }
+            // Treat 0 bitstream size as end of stream indicator
+            if (n_video_bytes == 0) {
+                pkg_flags |= ROCDEC_PKT_ENDOFSTREAM;
+            }
+            std::cerr << "Decoder pts :: " << pts << "\n";
+            n_frames_returned = viddec.DecodeFrame(p_video, n_video_bytes, pkg_flags, pts);
             if (!n_frame && !viddec.GetOutputSurfaceInfo(&surf_info)) {
                 std::cerr << "Error: Failed to get Output Image Info!" << std::endl;
                 break;
@@ -312,14 +392,14 @@ int main(int argc, char **argv) {
 
                 {
                     std::unique_lock<std::mutex> lock(mutex[current_frame_index]);
-                    cv[current_frame_index].wait(lock, [&] {return frame_queue[current_frame_index].empty();});
+                    condition_variable[current_frame_index].wait(lock, [&] {return frame_queue[current_frame_index].empty();});
                     // copy the decoded frame into the frame_buffers at current_frame_index
                     HIP_API_CALL(hipMemcpyDtoDAsync(frame_buffers[current_frame_index], p_frame, surf_info->output_surface_size_in_bytes, viddec.GetStream()));
                     frame_queue[current_frame_index].push(frame_buffers[current_frame_index]);
                 }
 
                 viddec.ReleaseFrame(pts);
-                cv[current_frame_index].notify_one(); // Notify the ColorSpaceConversionThread that a frame is available for post-processing
+                condition_variable[current_frame_index].notify_one(); // Notify the ColorSpaceConversionThread that a frame is available for post-processing
                 current_frame_index = (current_frame_index + 1) % frame_buffers_size; // update the current_frame_index to the next index in the frame_buffers
             }
 
@@ -331,7 +411,7 @@ int main(int argc, char **argv) {
             //Signal ColorSpaceConversionThread to stop
             continue_processing = false;
             lock.unlock();
-            cv[current_frame_index].notify_one();
+            condition_variable[current_frame_index].notify_one();
         }
 
         auto end_time = std::chrono::high_resolution_clock::now();

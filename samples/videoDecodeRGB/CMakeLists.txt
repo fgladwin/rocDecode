@@ -62,6 +62,7 @@ set(AMDGPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "List of specific ma
 
 find_package(HIP QUIET)
 find_package(FFmpeg QUIET)
+find_package(OpenCV QUIET)
 # find rocDecode
 find_library(ROCDECODE_LIBRARY NAMES rocdecode HINTS ${ROCM_PATH}/lib)
 find_path(ROCDECODE_INCLUDE_DIR NAMES rocdecode.h PATHS /opt/rocm/include/rocdecode ${ROCM_PATH}/include/rocdecode)
@@ -70,12 +71,17 @@ if(ROCDECODE_LIBRARY AND ROCDECODE_INCLUDE_DIR)
     message("-- ${White}${PROJECT_NAME}: Using rocDecode -- \n\tLibraries:${ROCDECODE_LIBRARY} \n\tIncludes:${ROCDECODE_INCLUDE_DIR}${ColourReset}")
 endif()
 
-if(HIP_FOUND AND FFMPEG_FOUND AND ROCDECODE_FOUND)
+if(HIP_FOUND AND FFMPEG_FOUND AND ROCDECODE_FOUND AND OpenCV_FOUND)
     # HIP
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::device)
     # FFMPEG
     include_directories(${AVUTIL_INCLUDE_DIR} ${AVCODEC_INCLUDE_DIR})
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${FFMPEG_LIBRARIES})
+    # OpenCV
+    message("-- OpenCV Found -- Version-${OpenCV_VERSION_MAJOR}.${OpenCV_VERSION_MINOR}.X Supported")
+    include_directories(${OpenCV_INCLUDE_DIRS})
+    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${OpenCV_LIBRARIES})
+
     # rocDecode and utils
     include_directories (${CMAKE_CURRENT_SOURCE_DIR}/../../utils ${ROCDECODE_INCLUDE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/rocvideodecode)
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${ROCDECODE_LIBRARY})
@@ -99,6 +105,12 @@ if(HIP_FOUND AND FFMPEG_FOUND AND ROCDECODE_FOUND)
     else()
       target_compile_definitions(${PROJECT_NAME} PUBLIC USE_AVCODEC_GREATER_THAN_58_134=1)
     endif()
+
+    if(${OpenCV_VERSION_MAJOR} EQUAL 4)
+      target_compile_definitions(${PROJECT_NAME} PUBLIC USE_OPENCV_4=1)
+    else()
+      target_compile_definitions(${PROJECT_NAME} PUBLIC USE_OPENCV_4=0)
+    endif()
 else()
     message("-- ERROR!: ${PROJECT_NAME} excluded! please install all the dependencies and try again!")
     if (NOT HIP_FOUND)
@@ -106,6 +118,9 @@ else()
     endif()
     if (NOT FFMPEG_FOUND)
         message(FATAL_ERROR "-- ERROR!: FFMPEG Not Found! - please install FFMPEG!")
+    endif()
+    if (NOT OpenCV_FOUND)
+      message(FATAL_ERROR "-- ERROR!: OpenCV Not Found! - please install OpenCV!")
     endif()
     if (NOT ROCDECODE_FOUND)
         message(FATAL_ERROR "-- ERROR!: rocDecode Not Found! - please install rocDecode!")
