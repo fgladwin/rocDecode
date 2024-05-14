@@ -408,7 +408,13 @@ int main(int argc, char **argv) {
                         }
                     }
                     post_process.ColorConvertYUV2RGB(frame_buffers[current_frame_index], surf_info, p_rgb_dev_mem, e_output_format, viddec.GetStream());
-                }                
+                }
+                // // sync to finish copy
+                // if (hipStreamSynchronize(viddec.GetStream()) != hipSuccess) {
+                //     THROW("hipStreamSynchronize failed for hipMemcpy ")
+                //     return -1;   
+                // }
+
                 if (dump_output_frames) {
                     if (convert_to_rgb) {
                         DumpRGBImage(output_file_path, p_rgb_dev_mem, surf_info, rgb_image_size);
@@ -424,7 +430,7 @@ int main(int argc, char **argv) {
             n_frame += n_frames_returned;
             // After every 3rd frame perform seek operation
             if (n_frame % 3 == 0) {
-                seek_to_frame += 3;
+                seek_to_frame += 50;
                 first_frame = true;
             }
         } while (n_video_bytes);
