@@ -332,8 +332,8 @@ int main(int argc, char **argv) {
         double total_dec_time = 0;
         convert_to_rgb = e_output_format != native;
         std::atomic<bool> continue_processing(true);
-        std::thread color_space_conversion_thread(ColorSpaceConversionThread, std::ref(continue_processing), std::ref(convert_to_rgb), &resize_dim, &surf_info, &resize_surf_info, std::ref(e_output_format),
-                                    std::ref(p_rgb_dev_mem), std::ref(p_resize_dev_mem), std::ref(dump_output_frames), std::ref(output_file_path), std::ref(viddec), std::ref(post_process), b_generate_md5);
+        // std::thread color_space_conversion_thread(ColorSpaceConversionThread, std::ref(continue_processing), std::ref(convert_to_rgb), &resize_dim, &surf_info, &resize_surf_info, std::ref(e_output_format),
+        //                             std::ref(p_rgb_dev_mem), std::ref(p_resize_dev_mem), std::ref(dump_output_frames), std::ref(output_file_path), std::ref(viddec), std::ref(post_process), b_generate_md5);
         VideoSeekContext video_seek_ctx;
         // seek options
         uint64_t seek_to_frame = 0;
@@ -391,34 +391,57 @@ int main(int argc, char **argv) {
                 }
 
                 {
-                    std::unique_lock<std::mutex> lock(mutex[current_frame_index]);
-                    condition_variable[current_frame_index].wait(lock, [&] {return frame_queue[current_frame_index].empty();});
+                    // std::unique_lock<std::mutex> lock(mutex[current_frame_index]);
+                    // condition_variable[current_frame_index].wait(lock, [&] {return frame_queue[current_frame_index].empty();});
                     // copy the decoded frame into the frame_buffers at current_frame_index
-                    HIP_API_CALL(hipMemcpyDtoDAsync(frame_buffers[current_frame_index], p_frame, surf_info->output_surface_size_in_bytes, viddec.GetStream()));
+                    HIP_API_CALL(hipMemcpyDtoD(frame_buffers[current_frame_index], p_frame, surf_info->output_surface_size_in_bytes));
                     frame_queue[current_frame_index].push(frame_buffers[current_frame_index]);
                 }
-
+                if (convert_to_rgb) {
+                    uint32_t rgb_stride = post_process.GetRgbStride(e_output_format, surf_info);
+                    rgb_image_size = surf_info->output_height * rgb_stride;
+                    if (p_rgb_dev_mem == nullptr) {
+                        hip_status = hipMalloc(&p_rgb_dev_mem, rgb_image_size);
+                        if (hip_status != hipSuccess) {
+                            std::cerr << "ERROR: hipMalloc failed to allocate the device memory for the output!" << hip_status << std::endl;
+                            return -1;
+                        }
+                    }
+                    post_process.ColorConvertYUV2RGB(frame_buffers[current_frame_index], surf_info, p_rgb_dev_mem, e_output_format, viddec.GetStream());
+                }                
+                if (dump_output_frames) {
+                    if (convert_to_rgb) {
+                        DumpRGBImage(output_file_path, p_rgb_dev_mem, surf_info, rgb_image_size);
+                        viddec.SaveFrameToFile(output_file_path, p_rgb_dev_mem, surf_info, rgb_image_size);
+                    } else
+                        viddec.SaveFrameToFile(output_file_path, frame_buffers[current_frame_index], surf_info);
+                }
                 viddec.ReleaseFrame(pts);
-                condition_variable[current_frame_index].notify_one(); // Notify the ColorSpaceConversionThread that a frame is available for post-processing
+                // condition_variable[current_frame_index].notify_one(); // Notify the ColorSpaceConversionThread that a frame is available for post-processing
                 current_frame_index = (current_frame_index + 1) % frame_buffers_size; // update the current_frame_index to the next index in the frame_buffers
             }
 
             n_frame += n_frames_returned;
+            // After every 3rd frame perform seek operation
+            if (n_frame % 3 == 0) {
+                seek_to_frame += 3;
+                first_frame = true;
+            }
         } while (n_video_bytes);
 
-        {
-            std::unique_lock<std::mutex> lock(mutex[current_frame_index]);
-            //Signal ColorSpaceConversionThread to stop
-            continue_processing = false;
-            lock.unlock();
-            condition_variable[current_frame_index].notify_one();
-        }
+        // {
+        //     std::unique_lock<std::mutex> lock(mutex[current_frame_index]);
+        //     //Signal ColorSpaceConversionThread to stop
+        //     continue_processing = false;
+        //     lock.unlock();
+        //     condition_variable[current_frame_index].notify_one();
+        // }
 
         auto end_time = std::chrono::high_resolution_clock::now();
         auto time_per_frame = std::chrono::duration<double, std::milli>(end_time - startTime).count();
         total_dec_time += time_per_frame;
 
-        color_space_conversion_thread.join();
+        // color_space_conversion_thread.join();
 
         if (p_rgb_dev_mem != nullptr) {
             hip_status = hipFree(p_rgb_dev_mem);
