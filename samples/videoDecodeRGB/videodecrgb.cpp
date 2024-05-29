@@ -102,6 +102,8 @@ void DumpRGBImage(std::string outputfileName, void* pdevMem, OutputSurfaceInfo *
         hstPtr = nullptr;
     }
 }
+
+/*
 constexpr int frame_buffers_size = 2;
 std::queue<uint8_t*> frame_queue[frame_buffers_size];
 std::mutex mutex[frame_buffers_size];
@@ -191,6 +193,7 @@ void ColorSpaceConversionThread(std::atomic<bool>& continue_processing, bool con
         current_frame_index = (current_frame_index + 1) % frame_buffers_size;
     }
 }
+*/
 
 int main(int argc, char **argv) {
 
@@ -212,8 +215,8 @@ int main(int argc, char **argv) {
     OutputSurfaceMemoryType mem_type = OUT_SURFACE_MEM_DEV_INTERNAL;
     OutputFormatEnum e_output_format = native; 
     int rgb_width;
-    uint8_t* frame_buffers[frame_buffers_size] = {0};
-    int current_frame_index = 0;
+    // uint8_t* frame_buffers[frame_buffers_size] = {0};
+    // int current_frame_index = 0;
     
 
     // Parse command-line arguments
@@ -383,20 +386,6 @@ int main(int argc, char **argv) {
             int last_index = 0;
             for (int i = 0; i < n_frames_returned; i++) {
                 p_frame = viddec.GetFrame(&pts);
-                // allocate extra device memories to use double-buffering for keeping two decoded frames
-                if (frame_buffers[0] == nullptr) {
-                    for (int i = 0; i < frame_buffers_size; i++) {
-                        HIP_API_CALL(hipMalloc(&frame_buffers[i], surf_info->output_surface_size_in_bytes));
-                    }
-                }
-
-                {
-                    // std::unique_lock<std::mutex> lock(mutex[current_frame_index]);
-                    // condition_variable[current_frame_index].wait(lock, [&] {return frame_queue[current_frame_index].empty();});
-                    // copy the decoded frame into the frame_buffers at current_frame_index
-                    HIP_API_CALL(hipMemcpyDtoD(frame_buffers[current_frame_index], p_frame, surf_info->output_surface_size_in_bytes));
-                    frame_queue[current_frame_index].push(frame_buffers[current_frame_index]);
-                }
                 if (convert_to_rgb) {
                     uint32_t rgb_stride = post_process.GetRgbStride(e_output_format, surf_info);
                     rgb_image_size = surf_info->output_height * rgb_stride;
@@ -407,7 +396,7 @@ int main(int argc, char **argv) {
                             return -1;
                         }
                     }
-                    post_process.ColorConvertYUV2RGB(frame_buffers[current_frame_index], surf_info, p_rgb_dev_mem, e_output_format, viddec.GetStream());
+                    post_process.ColorConvertYUV2RGB(p_frame, surf_info, p_rgb_dev_mem, e_output_format, viddec.GetStream());
                 }
                 // // sync to finish copy
                 // if (hipStreamSynchronize(viddec.GetStream()) != hipSuccess) {
@@ -420,11 +409,9 @@ int main(int argc, char **argv) {
                         DumpRGBImage(output_file_path, p_rgb_dev_mem, surf_info, rgb_image_size);
                         viddec.SaveFrameToFile(output_file_path, p_rgb_dev_mem, surf_info, rgb_image_size);
                     } else
-                        viddec.SaveFrameToFile(output_file_path, frame_buffers[current_frame_index], surf_info);
+                        viddec.SaveFrameToFile(output_file_path, p_frame, surf_info);
                 }
                 viddec.ReleaseFrame(pts);
-                // condition_variable[current_frame_index].notify_one(); // Notify the ColorSpaceConversionThread that a frame is available for post-processing
-                current_frame_index = (current_frame_index + 1) % frame_buffers_size; // update the current_frame_index to the next index in the frame_buffers
             }
 
             n_frame += n_frames_returned;
@@ -456,12 +443,12 @@ int main(int argc, char **argv) {
                 return -1;
             }
         }
-        for (int i = 0; i < frame_buffers_size; i++) {
+        /* for (int i = 0; i < frame_buffers_size; i++) {
             hip_status = hipFree(frame_buffers[i]);
             if (hip_status != hipSuccess) {
                 std::cout << "ERROR: hipFree failed! (" << hip_status << ")" << std::endl;
             }
-        }
+        } */
 
         std::cout << "info: Total frame decoded: " << n_frame << std::endl;
         if (!dump_output_frames) {
