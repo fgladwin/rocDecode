@@ -42,6 +42,7 @@ THE SOFTWARE.
 #include "video_demuxer.h"
 #include "roc_video_dec.h"
 #include "video_post_process.h"
+#include "common.h"
 
 #include "opencv2/opencv.hpp"
 
@@ -419,6 +420,16 @@ int main(int argc, char **argv) {
             if (n_frame % 3 == 0) {
                 seek_to_frame += 50;
                 first_frame = true;
+
+                ReconfigParams reconfig_params = { 0 };
+                ReconfigDumpFileStruct reconfig_user_struct = { 0 };
+                reconfig_user_struct.b_dump_frames_to_file = 1;
+                reconfig_user_struct.output_file_name = "output_file";
+                
+                reconfig_params.p_fn_reconfigure_flush = ReconfigureFlushCallback;
+                reconfig_params.reconfig_flush_mode = RECONFIG_FLUSH_MODE_DUMP_TO_FILE;
+                reconfig_params.p_reconfig_user_struct = &reconfig_user_struct;
+                viddec.SetReconfigParams(&reconfig_params);
             }
         } while (n_video_bytes);
 

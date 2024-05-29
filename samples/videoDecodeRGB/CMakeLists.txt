@@ -83,7 +83,7 @@ if(HIP_FOUND AND FFMPEG_FOUND AND ROCDECODE_FOUND AND OpenCV_FOUND)
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${OpenCV_LIBRARIES})
 
     # rocDecode and utils
-    include_directories (${CMAKE_CURRENT_SOURCE_DIR}/../../utils ${ROCDECODE_INCLUDE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/rocvideodecode)
+    include_directories (${CMAKE_CURRENT_SOURCE_DIR}/.. ${CMAKE_CURRENT_SOURCE_DIR}/../../utils ${ROCDECODE_INCLUDE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/rocvideodecode)
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${ROCDECODE_LIBRARY})
     # threads
     set(THREADS_PREFER_PTHREAD_FLAG ON)
