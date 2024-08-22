@@ -116,6 +116,11 @@ public:
     /* Number of frames that were decoded during seek. */
     uint64_t num_frames_decoded_;
 
+    /* DTS of frame found after seek. */
+    int64_t out_frame_dts_;
+    
+    /* DTS of frame to seek */
+    int64_t selected_frame_dts_;
 };
 
 
@@ -153,7 +158,7 @@ class VideoDemuxer {
                 av_free(data_with_header_);
             }
         }
-        bool Demux(uint8_t **video, int *video_size, int64_t *pts = nullptr) {
+        bool Demux(uint8_t **video, int *video_size, int64_t *pts = nullptr, int64_t *dts = nullptr) {
             if (!av_fmt_input_ctx_) {
                 return false;
             }
@@ -191,6 +196,7 @@ class VideoDemuxer {
                     *pts = (int64_t) (packet_filtered_->pts * default_time_scale_ * time_base_);
                     pkt_duration_ = packet_filtered_->duration;
                 }
+                if (dts) *dts = pkt_dts_;
             } else {
                 if (is_mpeg4_ && (frame_count_ == 0)) {
                     int ext_data_size = av_fmt_input_ctx_->streams[av_stream_]->codecpar->extradata_size;
@@ -218,6 +224,7 @@ class VideoDemuxer {
                     *pts = (int64_t)(packet_->pts * default_time_scale_ * time_base_);
                     pkt_duration_ = packet_->duration;
                 }
+                if (dts) *dts = pkt_dts_;
             }
             frame_count_++;
             return true;
@@ -240,10 +247,10 @@ class VideoDemuxer {
                 return false;
             }
 
+            int64_t timestamp = 0;
             // Seek for single frame;
             auto seek_frame = [&](VideoSeekContext const& seek_ctx, int flags) {
                 bool seek_backward = true;
-                int64_t timestamp = 0;
                 int ret = 0;
 
                 switch (seek_ctx.seek_crit_) {
@@ -299,7 +306,7 @@ class VideoDemuxer {
 
                 int seek_done = 0;
                 do {
-                    if (!Demux(pp_video, video_size, &pkt_data.pts)) {
+                    if (!Demux(pp_video, video_size, &pkt_data.pts, &pkt_data.dts)) {
                         throw std::runtime_error("ERROR: Demux failed trying to seek for specified frame number/timestamp");
                     }
                     seek_done = is_seek_done(pkt_data, seek_ctx);
@@ -317,15 +324,19 @@ class VideoDemuxer {
                 } while (seek_done != 0);
 
                 seek_ctx.out_frame_pts_ = pkt_data.pts;
+                seek_ctx.out_frame_dts_ = pkt_data.dts;
+                seek_ctx.selected_frame_dts_ = timestamp;
                 seek_ctx.out_frame_duration_ = pkt_data.duration = pkt_duration_;
             };
 
             // Seek for closest key frame in the past;
             auto seek_for_prev_key_frame = [&](PacketData& pkt_data, VideoSeekContext& seek_ctx) {
                 seek_frame(seek_ctx, AVSEEK_FLAG_BACKWARD);
-                Demux(pp_video, video_size, &pkt_data.pts);
+                Demux(pp_video, video_size, &pkt_data.pts, &pkt_data.dts);
                 seek_ctx.num_frames_decoded_ = static_cast<uint64_t>(pkt_data.pts / 1000 * frame_rate_);
                 seek_ctx.out_frame_pts_ = pkt_data.pts;
+                seek_ctx.out_frame_dts_ = pkt_data.dts;
+                seek_ctx.selected_frame_dts_ = timestamp;
                 seek_ctx.out_frame_duration_ = pkt_data.duration = pkt_duration_;
             };
 
