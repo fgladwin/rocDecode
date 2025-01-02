@@ -116,11 +116,14 @@ public:
     /* Number of frames that were decoded during seek. */
     uint64_t num_frames_decoded_;
 
-    /* DTS of frame found after seek. */
+    /* DTS of frame found after seek.
+     * In case the requested frame is not seekable, the demuxer will seek
+     * to the nearest seekable frame and its DTS is stored in out_frame_dts_.
+     */ 
     int64_t out_frame_dts_;
     
-    /* DTS of frame to seek */
-    int64_t selected_frame_dts_;
+    /* DTS of frame to seek as set by the user in seek_frame_. */
+    int64_t requested_frame_dts_;
 };
 
 
@@ -325,7 +328,7 @@ class VideoDemuxer {
 
                 seek_ctx.out_frame_pts_ = pkt_data.pts;
                 seek_ctx.out_frame_dts_ = pkt_data.dts;
-                seek_ctx.selected_frame_dts_ = timestamp;
+                seek_ctx.requested_frame_dts_ = timestamp;
                 seek_ctx.out_frame_duration_ = pkt_data.duration = pkt_duration_;
             };
 
@@ -336,7 +339,7 @@ class VideoDemuxer {
                 seek_ctx.num_frames_decoded_ = static_cast<uint64_t>(pkt_data.pts / 1000 * frame_rate_);
                 seek_ctx.out_frame_pts_ = pkt_data.pts;
                 seek_ctx.out_frame_dts_ = pkt_data.dts;
-                seek_ctx.selected_frame_dts_ = timestamp;
+                seek_ctx.requested_frame_dts_ = timestamp;
                 seek_ctx.out_frame_duration_ = pkt_data.duration = pkt_duration_;
             };
 
