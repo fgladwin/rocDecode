@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2023 - 2024 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2023 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -65,7 +65,7 @@ class VaapiVideoDecoder {
 public:
     VaapiVideoDecoder(RocDecoderCreateInfo &decoder_create_info);
     ~VaapiVideoDecoder();
-    rocDecStatus InitializeDecoder(std::string device_name, std::string gcn_arch_name);
+    rocDecStatus InitializeDecoder(std::string device_name, std::string gcn_arch_name, std::string& gpu_uuid);
     rocDecStatus SubmitDecode(RocdecPicParams *pPicParams);
     rocDecStatus GetDecodeStatus(int pic_idx, RocdecDecodeStatus* decode_status);
     rocDecStatus ExportSurface(int pic_idx, VADRMPRIMESurfaceDescriptor &va_drm_prime_surface_desc);
@@ -88,12 +88,21 @@ private:
     uint32_t num_slices_;
     VABufferID slice_data_buf_id_;
     uint32_t slice_data_buf_size_;
+    /**
+     * @brief A map that associates GPU UUIDs with their corresponding render node indices.
+     * 
+     * This unordered map uses GPU UUIDs as keys (std::string) and maps them to their 
+     * respective render node indices (int). It provides a fast lookup mechanism to 
+     * retrieve the render node index for a given GPU UUID.
+     */
+    std::unordered_map<std::string, int> gpu_uuids_to_render_nodes_map_;
 
     rocDecStatus InitVAAPI(std::string drm_node);
     rocDecStatus CreateDecoderConfig();
     rocDecStatus CreateSurfaces();
     rocDecStatus CreateContext();
     rocDecStatus DestroyDataBuffers();
+    void GetGpuUuids();
     void GetVisibleDevices(std::vector<int>& visible_devices);
     void GetCurrentComputePartition(std::vector<ComputePartition> &currnet_compute_partitions);
     void GetDrmNodeOffset(std::string device_name, uint8_t device_id, std::vector<int>& visible_devices,

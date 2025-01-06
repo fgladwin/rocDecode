@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2023 - 2024 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2023 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -174,6 +174,7 @@ class FFMpegVideoDecoder: public RocVideoDecoder {
         void DecodeThread();
         int DecodeAvFrame(AVPacket *av_pkt, AVFrame *p_frame);
         void InitOutputFrameInfo(AVFrame *p_frame);
+        int FlushDecoder();
         void PushPacket(AVPacket *pkt) {
             {
                 std::lock_guard<std::mutex> lock(mtx_pkt_q_);

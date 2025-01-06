@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2023 - 2024 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2023 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -58,8 +58,8 @@ RocDecoder::RocDecoder(RocDecoderCreateInfo& decoder_create_info): va_video_deco
     for (auto i = 0; i < hip_interop_.size(); i++) {
         memset((void *)&hip_interop_[i], 0, sizeof(hip_interop_[i]));
     }
-
-    rocdec_status = va_video_decoder_.InitializeDecoder(hip_dev_prop_.name, hip_dev_prop_.gcnArchName);
+    std::string gpu_uuid(hip_dev_prop_.uuid.bytes, sizeof(hip_dev_prop_.uuid.bytes));
+    rocdec_status = va_video_decoder_.InitializeDecoder(hip_dev_prop_.name, hip_dev_prop_.gcnArchName, gpu_uuid);
     if (rocdec_status != ROCDEC_SUCCESS) {
         ERR("Failed to initilize the VAAPI Video decoder.");
         return rocdec_status;
