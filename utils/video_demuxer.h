@@ -124,6 +124,9 @@ public:
     
     /* DTS of frame to seek as set by the user in seek_frame_. */
     int64_t requested_frame_dts_;
+
+    /* PTS of frame to seek as set by the user in seek_frame_. */
+    int64_t requested_frame_pts_;
 };
 
 
@@ -329,6 +332,7 @@ class VideoDemuxer {
                 seek_ctx.out_frame_pts_ = pkt_data.pts;
                 seek_ctx.out_frame_dts_ = pkt_data.dts;
                 seek_ctx.requested_frame_dts_ = timestamp;
+                seek_ctx.requested_frame_pts_ = (int64_t) (timestamp * default_time_scale_ * time_base_);
                 seek_ctx.out_frame_duration_ = pkt_data.duration = pkt_duration_;
             };
 
@@ -340,6 +344,7 @@ class VideoDemuxer {
                 seek_ctx.out_frame_pts_ = pkt_data.pts;
                 seek_ctx.out_frame_dts_ = pkt_data.dts;
                 seek_ctx.requested_frame_dts_ = timestamp;
+                seek_ctx.requested_frame_pts_ = (int64_t) (timestamp * default_time_scale_ * time_base_);
                 seek_ctx.out_frame_duration_ = pkt_data.duration = pkt_duration_;
             };
 
